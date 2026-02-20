@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   CreditCard,
   Wallet,
-  QrCode,
   Building,
   CornerUpRight,
   Activity,
@@ -269,7 +268,17 @@ export default function MediLokaApp() {
   const [familyMembers, setFamilyMembers] = useState(FAMILY_MEMBERS);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRelation, setNewMemberRelation] = useState('Lainnya');
+  const [newMemberNik, setNewMemberNik] = useState('');
+  const [newMemberDob, setNewMemberDob] = useState('');
+  const [newMemberPhone, setNewMemberPhone] = useState('');
   const [editingMember, setEditingMember] = useState(null); // null = mode tambah, object = mode update
+
+  // Login / Registrasi state (menu Riwayat Kunjungan & Hasil Lab hanya tampil jika isLoggedIn)
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [registrationStep, setRegistrationStep] = useState(1); // 1=OTP, 2=Data Pribadi, 3=Profil Keluarga
+  const [registrationFromProfile, setRegistrationFromProfile] = useState(false); // true = dari ikon profil (bukan dari booking)
+  const [userProfile, setUserProfile] = useState(null); // data pribadi user yang sudah login (untuk view profil)
 
   // Simulasi registrasi pasien baru (OTP + form)
   const [otpSent, setOtpSent] = useState(false);
@@ -345,23 +354,30 @@ export default function MediLokaApp() {
     }, 1500); 
   };
 
-  const handleSimulatePostExam = (e) => {
-    e.stopPropagation(); 
-    
-    const newBilling = {
-      consultation: activeBooking.doctor.price,
-      admin: 15000,
-      treatment: 250000, 
-      medicine: 185000,  
+  // Alur simulasi: confirmed → nurse_station → doctor_exam → lab_exam → doctor_exam_2 → post_exam (tagihan)
+  const handleSimulateNextStage = (e) => {
+    e?.stopPropagation();
+    const next = {
+      confirmed: 'nurse_station',
+      nurse_station: 'doctor_exam',
+      doctor_exam: 'lab_exam',
+      lab_exam: 'doctor_exam_2',
+      doctor_exam_2: 'post_exam',
     };
-    newBilling.total = newBilling.consultation + newBilling.admin + newBilling.treatment + newBilling.medicine;
-    
-    setActiveBooking(prev => ({
-      ...prev,
-      status: 'post_exam', 
-      billing: newBilling
-    }));
-    setView('billing');
+    const current = activeBooking.status;
+    if (current === 'doctor_exam_2') {
+      const newBilling = {
+        consultation: activeBooking.doctor.price,
+        admin: 15000,
+        treatment: 250000,
+        medicine: 185000,
+      };
+      newBilling.total = newBilling.consultation + newBilling.admin + newBilling.treatment + newBilling.medicine;
+      setActiveBooking(prev => ({ ...prev, status: 'post_exam', billing: newBilling }));
+      setView('billing');
+    } else if (next[current]) {
+      setActiveBooking(prev => ({ ...prev, status: next[current] }));
+    }
   };
 
   const handleFinalPayment = () => {
@@ -492,9 +508,13 @@ export default function MediLokaApp() {
                     className="h-10 object-contain filter brightness-0 invert"
                    />
                 </div>
-                <div className="bg-white/20 backdrop-blur-sm p-2 rounded-full text-white">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(true)}
+                  className="bg-white/20 backdrop-blur-sm p-2 rounded-full text-white hover:bg-white/30"
+                >
                   <User size={20} />
-                </div>
+                </button>
               </div>
               
               <h1 className="text-white text-3xl font-bold leading-tight mb-2">
@@ -503,73 +523,164 @@ export default function MediLokaApp() {
               <p className="text-blue-50 text-sm font-light">Lebih tenang bersama Edelweiss</p>
             </div>
 
-            {/* ACTIVE TICKET SECTION (Jadwal Mendatang / Tagihan) — di atas form jika ada */}
+            {/* ACTIVE TICKET SECTION — desain card berbeda tiap tahap */}
             {activeBooking && (
               <div className="px-5 -mt-16 mb-6 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                
-                {activeBooking.status === 'confirmed' ? (
+                {/* QR Dummy URL (untuk semua tahap) */}
+                {['confirmed', 'nurse_station', 'doctor_exam', 'lab_exam', 'doctor_exam_2'].includes(activeBooking.status) && (
                   <>
                     <div className="flex justify-between items-center mb-3">
-                       <h3 className="font-bold text-white">Jadwal Mendatang</h3>
+                      <h3 className="font-bold text-white">Jadwal Mendatang</h3>
                     </div>
-                    
-                    <button 
-                      onClick={() => setView('ticket_detail')}
-                      className="w-full bg-white rounded-t-2xl shadow-lg border border-gray-100 overflow-hidden text-left group transition-all"
-                    >
-                      {/* Top colored strip with Date & Status */}
-                      <div className="bg-blue-50/80 px-4 py-2.5 flex justify-between items-center border-b border-blue-100">
-                        <span className="text-xs font-bold text-edel-blue flex items-center gap-1.5">
-                          <Calendar size={14} className="text-edel-blue" /> 
-                          {formatDate(new Date(activeBooking.date))}
-                        </span>
-                        <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <CheckCircle2 size={10} /> Confirmed
-                        </span>
-                      </div>
 
-                      <div className="p-4 relative">
-                        <div className="flex gap-4 items-center">
-                          <div className="bg-white border-2 border-edel-blue/10 rounded-xl p-1 text-center min-w-[75px] flex flex-col justify-center shadow-sm">
-                            <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Antrian</span>
-                            <span className="text-3xl font-bold text-edel-blue leading-none">{activeBooking.queueNo}</span>
+                    {/* TAHAP 1: Booking Dikonfirmasi — card biru putih, fokus kode booking + countdown */}
+                    {activeBooking.status === 'confirmed' && (
+                      <button onClick={() => setView('ticket_detail')} className="w-full text-left rounded-t-2xl overflow-hidden shadow-lg border-2 border-edel-blue/20 bg-white">
+                        <div className="bg-gradient-to-r from-edel-blue to-[#0090C5] px-4 py-3 flex items-center justify-between">
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Booking Dikonfirmasi</span>
+                          <CheckCircle2 size={18} className="text-white" />
+                        </div>
+                        <div className="p-4 flex gap-4">
+                          <div className="flex-shrink-0">
+                            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR Booking" className="w-20 h-20 rounded-lg border border-gray-200" />
+                            <p className="text-[9px] text-gray-500 mt-1 font-mono font-bold text-center">Kode Booking</p>
                           </div>
-
                           <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-gray-800 text-lg leading-tight truncate">{activeBooking.doctor.name}</h4>
-                            <p className="text-xs text-edel-pink font-bold mt-1 mb-2">{activeBooking.doctor.specialty}</p>
-                            <div className="flex items-center gap-3">
-                              <p className="text-xs text-gray-500 font-medium flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md">
-                                <Clock size={12} className="text-gray-400" /> {activeBooking.schedule.startTime} - {activeBooking.schedule.endTime}
-                              </p>
+                            <p className="text-xs font-mono font-bold text-edel-blue break-all">{activeBooking.bookingCode}</p>
+                            <p className="text-sm font-bold text-gray-800 mt-1 truncate">{activeBooking.doctor.name}</p>
+                            <p className="text-xs text-edel-pink font-semibold">{activeBooking.doctor.specialty}</p>
+                            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                              <Calendar size={12} /> {formatDate(new Date(activeBooking.date))} • <Clock size={12} /> {activeBooking.schedule.startTime}
+                            </p>
+                            <BookingCountdown targetDate={activeBooking.date} />
+                            <p className="text-xs text-gray-600 mt-2 leading-snug">Silakan check-in di <strong>APM</strong> untuk dapat nomor antrian, lalu ke <strong>Nurse Station</strong> untuk pemeriksaan awal.</p>
+                          </div>
+                        </div>
+                        <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
+                          <span className="text-xs text-gray-500 flex items-center gap-1"><MapPin size={12} /> {activeBooking.hospital}</span>
+                          <span className="text-xs font-bold text-edel-blue">Buka E-Ticket</span>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* TAHAP 2: Nurse Station — card tema hijau/teal, fokus pemeriksaan awal */}
+                    {activeBooking.status === 'nurse_station' && (
+                      <button onClick={() => setView('ticket_detail')} className="w-full text-left rounded-t-2xl overflow-hidden shadow-lg border-2 border-teal-200 bg-white">
+                        <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-4 py-3 flex items-center gap-2">
+                          <Activity size={18} className="text-white" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Tahap: Nurse Station (Pemeriksaan Awal)</span>
+                        </div>
+                        <div className="p-4 bg-teal-50/50">
+                          <div className="flex gap-3">
+                            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=64x64&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR" className="w-16 h-16 rounded-lg border border-teal-200 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-[10px] text-teal-700 font-semibold uppercase">Kode Booking</p>
+                              <p className="text-xs font-mono font-bold text-gray-800">{activeBooking.bookingCode}</p>
+                              <p className="text-xs text-gray-600 mt-2">Pemeriksaan awal oleh perawat (tensi & data vital). Setelah selesai, tunggu panggilan ke ruang dokter.</p>
                             </div>
                           </div>
-                          <ChevronLeft size={20} className="text-gray-300 rotate-180 flex-shrink-0" />
+                          <div className="mt-3 pt-3 border-t border-teal-100 flex justify-between text-xs text-gray-500">
+                            <span>{activeBooking.doctor.name} • {activeBooking.schedule.startTime}</span>
+                            <MapPin size={12} className="flex-shrink-0" />
+                          </div>
                         </div>
+                        <div className="px-4 py-2 bg-white border-t border-gray-100 flex justify-between items-center">
+                          <span className="text-xs text-gray-500">{activeBooking.hospital}</span>
+                          <span className="text-xs font-bold text-teal-600">Buka E-Ticket</span>
+                        </div>
+                      </button>
+                    )}
 
-                        <BookingCountdown targetDate={activeBooking.date} />
-                      </div>
+                    {/* TAHAP 3: Pemeriksaan Dokter — card tema biru dokter */}
+                    {activeBooking.status === 'doctor_exam' && (
+                      <button onClick={() => setView('ticket_detail')} className="w-full text-left rounded-t-2xl overflow-hidden shadow-lg border-2 border-edel-blue/30 bg-white">
+                        <div className="bg-gradient-to-r from-edel-blue to-blue-500 px-4 py-3 flex items-center gap-2">
+                          <Stethoscope size={18} className="text-white" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Tahap: Pemeriksaan Dokter</span>
+                        </div>
+                        <div className="p-4 flex gap-3">
+                          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=64x64&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR" className="w-16 h-16 rounded-lg border border-blue-200 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-[10px] text-edel-blue font-semibold uppercase">Kode Booking</p>
+                            <p className="text-xs font-mono font-bold text-gray-800">{activeBooking.bookingCode}</p>
+                            <p className="text-sm font-bold text-gray-800 mt-1">{activeBooking.doctor.name}</p>
+                            <p className="text-xs text-edel-pink font-semibold">{activeBooking.doctor.specialty}</p>
+                            <p className="text-xs text-gray-600 mt-2">Pemeriksaan dokter. Jika ada rujukan lab, Anda akan diarahkan ke lab.</p>
+                          </div>
+                        </div>
+                        <div className="px-4 py-2 bg-blue-50/50 border-t border-blue-100 flex justify-between items-center text-xs text-gray-600">
+                          <span><MapPin size={12} className="inline mr-1" /> {activeBooking.hospital}</span>
+                          <span className="font-bold text-edel-blue">Buka E-Ticket</span>
+                        </div>
+                      </button>
+                    )}
 
-                      <div className="px-4 py-3 bg-gray-50 flex justify-between items-center border-t border-gray-100">
-                         <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-                            <MapPin size={12} className="text-gray-400" />
-                            <span className="truncate max-w-[180px]">{activeBooking.hospital}</span>
-                         </div>
-                         <span className="text-xs font-bold text-edel-blue group-hover:underline">Buka E-Ticket</span>
-                      </div>
-                    </button>
-                    
-                    {/* SIMULASI BUTTON (POST EXAM) */}
-                    <div className="bg-white border-x border-b border-gray-100 rounded-b-2xl shadow-lg p-3 flex justify-end">
-                       <button 
-                          onClick={handleSimulatePostExam} 
-                          className="text-xs bg-edel-purple hover:bg-[#4A2B6E] text-white px-4 py-2.5 rounded-xl shadow-md font-bold flex items-center gap-2 transition-colors active:scale-95 w-full justify-center"
-                        >
-                         <Stethoscope size={16} /> Klik Simulasi Selesai Diperiksa
-                       </button>
+                    {/* TAHAP 4: Pemeriksaan Lab — card tema ungu/lab */}
+                    {activeBooking.status === 'lab_exam' && (
+                      <button onClick={() => setView('ticket_detail')} className="w-full text-left rounded-t-2xl overflow-hidden shadow-lg border-2 border-purple-200 bg-white">
+                        <div className="bg-gradient-to-r from-purple-500 to-edel-purple px-4 py-3 flex items-center gap-2">
+                          <Microscope size={18} className="text-white" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Tahap: Pemeriksaan Lab</span>
+                        </div>
+                        <div className="p-4 bg-purple-50/50">
+                          <div className="flex gap-3">
+                            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=64x64&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR" className="w-16 h-16 rounded-lg border border-purple-200 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-[10px] text-edel-purple font-semibold uppercase">Kode Booking</p>
+                              <p className="text-xs font-mono font-bold text-gray-800">{activeBooking.bookingCode}</p>
+                              <p className="text-xs text-gray-600 mt-2">Lab selesai. Kembali ke ruang dokter dengan hasil; tunggu panggilan antrian.</p>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-2 flex items-center gap-1"><Clock size={12} /> Dokter: {activeBooking.doctor.name}</p>
+                        </div>
+                        <div className="px-4 py-2 bg-white border-t border-gray-100 flex justify-between items-center text-xs text-gray-500">
+                          <span>{activeBooking.hospital}</span>
+                          <span className="font-bold text-edel-purple">Buka E-Ticket</span>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* TAHAP 5: Kembali ke Dokter (final) — card tema amber/orange */}
+                    {activeBooking.status === 'doctor_exam_2' && (
+                      <button onClick={() => setView('ticket_detail')} className="w-full text-left rounded-t-2xl overflow-hidden shadow-lg border-2 border-amber-200 bg-white">
+                        <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 flex items-center gap-2">
+                          <Stethoscope size={18} className="text-white" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Tahap: Pemeriksaan Lanjutan Dokter</span>
+                        </div>
+                        <div className="p-4 bg-amber-50/50">
+                          <div className="flex gap-3">
+                            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=64x64&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR" className="w-16 h-16 rounded-lg border border-amber-200 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-[10px] text-amber-700 font-semibold uppercase">Kode Booking</p>
+                              <p className="text-xs font-mono font-bold text-gray-800">{activeBooking.bookingCode}</p>
+                              <p className="text-xs text-gray-600 mt-2">Pemeriksaan lanjutan. Setelah selesai → ke Kasir untuk pembayaran, lalu farmasi jika ada resep.</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="px-4 py-2 bg-white border-t border-gray-100 flex justify-between items-center text-xs text-gray-500">
+                          <span>{activeBooking.hospital}</span>
+                          <span className="font-bold text-amber-600">Buka E-Ticket</span>
+                        </div>
+                      </button>
+                    )}
+
+                    <div className="bg-white border-x border-b border-gray-100 rounded-b-2xl shadow-lg p-3">
+                      <button
+                        onClick={handleSimulateNextStage}
+                        className="w-full text-xs bg-edel-purple hover:bg-[#4A2B6E] text-white px-4 py-2.5 rounded-xl shadow-md font-bold flex items-center justify-center gap-2 transition-colors active:scale-95"
+                      >
+                        <Stethoscope size={16} />
+                        {activeBooking.status === 'confirmed' && 'Simulasi Selesai di Nurse Station'}
+                        {activeBooking.status === 'nurse_station' && 'Simulasi Pemeriksaan Dokter'}
+                        {activeBooking.status === 'doctor_exam' && 'Simulasi Pemeriksaan Lab'}
+                        {activeBooking.status === 'lab_exam' && 'Simulasi Kembali ke Pemeriksaan Dokter'}
+                        {activeBooking.status === 'doctor_exam_2' && 'Simulasi Selesai Diperiksa → Tagihan'}
+                      </button>
                     </div>
                   </>
-                ) : (
+                )}
+
+                {activeBooking.status === 'post_exam' && (
                   // CARD UNPAID BILL (Muncul Setelah Simulasi Diperiksa)
                   <button 
                     onClick={() => setView('billing')} 
@@ -677,9 +788,10 @@ export default function MediLokaApp() {
               </div>
             </div>
 
-            {/* MAIN MENU GRID - Layanan Digital (3 item: Rekam Medis, Tebus Obat, Hasil Lab) */}
+            {/* Layanan Digital: hanya tampil jika user sudah login */}
+            {isLoggedIn && (
             <div className="px-5 mb-6">
-               
+               <h3 className="font-bold text-edel-purple mb-3">Layanan Digital</h3>
                <div className="grid grid-cols-2 gap-4">
                   <button 
                     onClick={() => setView('medical_records')}
@@ -688,7 +800,7 @@ export default function MediLokaApp() {
                     <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center text-edel-purple border border-purple-100 group-hover:bg-edel-purple group-hover:text-white transition-colors">
                       <Activity size={24} />
                     </div>
-                    <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-purple">Rekam<br/>Medis</span>
+                    <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-purple">Riwayat<br/>Kunjungan</span>
                   </button>
                   <button 
                     onClick={() => setView('lab_results')}
@@ -700,6 +812,112 @@ export default function MediLokaApp() {
                     <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-pink">Hasil<br/>Lab</span>
                   </button>
                </div>
+            </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Profil (ikon home): Existing = data pribadi + kelola keluarga, New = registrasi */}
+      {showProfileModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg text-edel-purple">Akun Saya</h3>
+              <button onClick={() => setShowProfileModal(false)} className="p-1 hover:bg-gray-100 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Pilih tipe pengguna untuk simulasi.</p>
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  setShowProfileModal(false);
+                  if (!userProfile) setUserProfile({ fullName: 'Budi Santoso (Saya)', phone: '08123456789', nik: '3201012345670001', dob: '1990-01-15', gender: 'Pria', address: 'Jl. Merdeka No. 45, Bandung' });
+                  setIsLoggedIn(true);
+                  setView('profile');
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-edel-blue bg-blue-50 text-edel-blue font-bold text-sm hover:bg-blue-100"
+              >
+                <User size={20} />
+                <div className="text-left">
+                  <p>Simulasi Existing User</p>
+                  <p className="text-[11px] font-normal text-gray-600">Data pribadi & kelola anggota keluarga</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowProfileModal(false);
+                  setRegistrationFromProfile(true);
+                  setRegistrationStep(1);
+                  setOtpSent(false);
+                  setOtpVerified(false);
+                  setRegistrationForm({ fullName: '', phone: '', nik: '', dob: '', gender: 'Pria', address: '' });
+                  setView('registration');
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 bg-white text-gray-700 font-bold text-sm hover:border-edel-pink hover:bg-pink-50"
+              >
+                <ClipboardList size={20} />
+                <div className="text-left">
+                  <p>Simulasi New User</p>
+                  <p className="text-[11px] font-normal text-gray-600">Registrasi pasien baru</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- PROFILE VIEW (Data Pribadi + Kelola Anggota - Existing User) --- */}
+      {view === 'profile' && (
+        <div className="w-full min-h-screen bg-white flex justify-center">
+          <div className="w-full max-w-md bg-white min-h-screen flex flex-col relative pb-20">
+            <div className="bg-white p-4 shadow-sm flex items-center gap-3 sticky top-0 z-20 border-b border-gray-100">
+              <button onClick={() => setView('home')} className="text-gray-700 hover:bg-gray-100 p-2 rounded-full">
+                <ChevronLeft size={24} />
+              </button>
+              <h2 className="font-bold text-lg text-edel-purple">Data Pribadi & Keluarga</h2>
+            </div>
+            <div className="p-5 space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="text-sm font-bold text-edel-purple mb-3">Data Pribadi</h3>
+                {userProfile ? (
+                  <div className="space-y-2 text-sm">
+                    <p><span className="text-gray-500">Nama:</span> <span className="font-semibold">{userProfile.fullName}</span></p>
+                    <p><span className="text-gray-500">No. HP:</span> {userProfile.phone}</p>
+                    <p><span className="text-gray-500">NIK:</span> {userProfile.nik}</p>
+                    <p><span className="text-gray-500">TTL:</span> {userProfile.dob}</p>
+                    <p><span className="text-gray-500">Alamat:</span> {userProfile.address}</p>
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm">Data dari profil default. (Simulasi)</p>
+                )}
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="text-sm font-bold text-edel-purple mb-3">Kelola Anggota Keluarga</h3>
+                <p className="text-xs text-gray-500 mb-3">Tambah atau ubah profil anggota keluarga.</p>
+                {familyMembers.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                    <img src={m.avatar} alt="" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-gray-800 text-sm">{m.name}</p>
+                      <p className="text-xs text-gray-500">{m.relation}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingMember(m); setNewMemberName(m.name); setNewMemberRelation(m.relation || 'Lainnya'); setNewMemberNik(m.nik || ''); setNewMemberDob(m.dob || ''); setNewMemberPhone(m.phone || ''); setShowAddFamilyModal(true); }}
+                      className="text-xs font-bold text-edel-blue"
+                    >Ubah</button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => { setEditingMember(null); setNewMemberName(''); setNewMemberRelation('Lainnya'); setNewMemberNik(''); setNewMemberDob(''); setNewMemberPhone(''); setShowAddFamilyModal(true); }}
+                  className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 hover:border-edel-blue hover:text-edel-blue text-sm font-medium"
+                >
+                  <User size={18} /> Tambah Anggota Keluarga
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -722,6 +940,9 @@ export default function MediLokaApp() {
                     setEditingMember(selectedFamilyMember);
                     setNewMemberName(selectedFamilyMember.name);
                     setNewMemberRelation(selectedFamilyMember.relation || 'Lainnya');
+                    setNewMemberNik(selectedFamilyMember.nik || '');
+                    setNewMemberDob(selectedFamilyMember.dob || '');
+                    setNewMemberPhone(selectedFamilyMember.phone || '');
                     setShowAddFamilyModal(true);
                   }}
                   className="text-xs font-semibold text-edel-blue px-3 py-1 rounded-full border border-edel-blue/20 hover:bg-blue-50"
@@ -1019,7 +1240,7 @@ export default function MediLokaApp() {
             
             <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                <button className="w-full bg-white border border-edel-blue text-edel-blue hover:bg-blue-50 font-bold py-3.5 rounded-xl transition-all flex justify-center items-center gap-2">
-                 <Download size={18} /> Unduh Resume Medis (PDF)
+                 <Download size={18} /> Unduh Resume Riwayat Kunjungan (PDF)
                </button>
             </div>
           </div>
@@ -1161,9 +1382,16 @@ export default function MediLokaApp() {
                               key={sch.id}
                               onClick={() => {
                                 setIsWaitingList(sch.booked >= 4);
-                                setPendingDoctor(doc);
-                                setPendingSchedule(sch);
-                                setShowUserTypeModal(true);
+                                if (isLoggedIn) {
+                                  setPatientType('returning');
+                                  setSelectedDoctor(doc);
+                                  setSelectedSchedule(sch);
+                                  setView('booking');
+                                } else {
+                                  setPendingDoctor(doc);
+                                  setPendingSchedule(sch);
+                                  setShowUserTypeModal(true);
+                                }
                               }}
                               className={`flex flex-col items-center justify-center px-3 py-1.5 rounded-lg border transition-all ${bgClass}`}
                             >
@@ -1270,7 +1498,7 @@ export default function MediLokaApp() {
             <div className="space-y-3">
               <button
                 onClick={() => {
-                  // Existing user: langsung ke konfirmasi booking seperti sekarang
+                  setIsLoggedIn(true);
                   setPatientType('returning');
                   setSelectedDoctor(pendingDoctor);
                   setSelectedSchedule(pendingSchedule);
@@ -1286,20 +1514,20 @@ export default function MediLokaApp() {
                 </div>
                 <div className="text-left">
                   <p>Simulasi Existing User</p>
-                  <p className="text-[11px] font-normal text-gray-600">Langsung pilih &quot;booking untuk siapa&quot; seperti flow sekarang.</p>
+                  <p className="text-[11px] font-normal text-gray-600">Langsung pilih &quot;booking untuk siapa&quot;.</p>
                 </div>
               </button>
 
               <button
                 onClick={() => {
-                  // New user: arahkan ke halaman registrasi (OTP + data pribadi)
                   setPatientType('new');
                   setSelectedDoctor(pendingDoctor);
                   setSelectedSchedule(pendingSchedule);
+                  setRegistrationFromProfile(false);
+                  setRegistrationStep(1);
                   setShowUserTypeModal(false);
                   setPendingDoctor(null);
                   setPendingSchedule(null);
-                  // reset form registrasi
                   setOtpSent(false);
                   setOtpVerified(false);
                   setRegistrationForm({
@@ -1420,15 +1648,17 @@ export default function MediLokaApp() {
         </div>
       )}
 
-      {/* --- REGISTRATION VIEW (NEW USER FLOW) --- */}
-      {view === 'registration' && selectedDoctor && selectedSchedule && (
+      {/* --- REGISTRATION VIEW (3 STEP: OTP → Data Pribadi → Profil Keluarga) --- */}
+      {view === 'registration' && (
         <div className="w-full min-h-screen bg-white flex justify-center">
           <div className="w-full max-w-md bg-white min-h-screen flex flex-col relative">
             <div className="bg-white p-4 shadow-sm flex items-center gap-3 sticky top-0 z-20 border-b border-gray-100">
               <button
                 onClick={() => {
-                  // kembali ke hasil pencarian jika batal
-                  setView('search');
+                  if (registrationStep === 1) {
+                    if (registrationFromProfile) setView('home'); else setView('search');
+                    setRegistrationStep(1);
+                  } else setRegistrationStep(registrationStep - 1);
                 }}
                 className="text-gray-700 hover:bg-gray-100 p-2 rounded-full"
               >
@@ -1437,36 +1667,46 @@ export default function MediLokaApp() {
               <h2 className="font-bold text-lg text-edel-purple">Registrasi Pasien Baru</h2>
             </div>
 
-            <div className="p-5 overflow-y-auto pb-32 space-y-5">
-              {/* Ringkasan dokter & jadwal yang dipilih */}
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 items-start">
-                <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center">
-                  <Stethoscope size={20} className="text-edel-blue" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-[10px] text-blue-700 font-semibold uppercase tracking-wider mb-1">
-                    Anda sedang mendaftar untuk
-                  </p>
-                  <p className="text-sm font-bold text-gray-800">{selectedDoctor.name}</p>
-                  <p className="text-xs text-edel-blue font-semibold">{selectedDoctor.specialty}</p>
-                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                    <Calendar size={12} /> {formatDate(searchParams.date)} • {selectedSchedule.startTime} - {selectedSchedule.endTime}
-                  </p>
-                </div>
-              </div>
+            {/* Progress: Step 1, 2, 3 */}
+            <div className="px-5 py-3 flex gap-2">
+              {[1, 2, 3].map((s) => (
+                <div
+                  key={s}
+                  className={`h-1 flex-1 rounded-full ${registrationStep >= s ? 'bg-edel-blue' : 'bg-gray-200'}`}
+                />
+              ))}
+            </div>
 
-              {/* Step 1: Login OTP */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-gray-800">1. Verifikasi No. HP (OTP)</h3>
-                  {otpVerified && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
-                      <CheckCircle2 size={14} /> Terverifikasi
-                    </span>
-                  )}
+            <div className="p-5 overflow-y-auto pb-32">
+              {!registrationFromProfile && selectedDoctor && selectedSchedule && (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 items-start mb-5">
+                  <Stethoscope size={20} className="text-edel-blue flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-[10px] text-blue-700 font-semibold uppercase tracking-wider mb-1">Booking untuk</p>
+                    <p className="text-sm font-bold text-gray-800">{selectedDoctor.name}</p>
+                    <p className="text-xs text-edel-blue font-semibold">{selectedDoctor.specialty}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      <Calendar size={12} className="inline mr-1" />
+                      {formatDate(searchParams.date)} • {selectedSchedule.startTime} - {selectedSchedule.endTime}
+                    </p>
+                  </div>
                 </div>
+              )}
 
-                <div className="space-y-2">
+              {/* STEP 1: Verifikasi No. HP (OTP) */}
+              {registrationStep === 1 && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-800">1. Verifikasi No. HP (OTP)</h3>
+                    {otpVerified && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+                        <CheckCircle2 size={14} /> Terverifikasi
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Kode OTP akan dikirim via <strong>WhatsApp</strong> ke nomor yang Anda masukkan.
+                  </p>
                   <label className="text-xs text-gray-500 font-semibold block">No. Handphone</label>
                   <div className="flex gap-2">
                     <input
@@ -1474,9 +1714,7 @@ export default function MediLokaApp() {
                       className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
                       placeholder="08xxxxxxxxxx"
                       value={registrationForm.phone}
-                      onChange={(e) =>
-                        setRegistrationForm({ ...registrationForm, phone: e.target.value })
-                      }
+                      onChange={(e) => setRegistrationForm({ ...registrationForm, phone: e.target.value })}
                     />
                     <button
                       type="button"
@@ -1488,9 +1726,7 @@ export default function MediLokaApp() {
                   </div>
                   {otpSent && (
                     <div className="mt-2 space-y-1">
-                      <label className="text-xs text-gray-500 font-semibold block">
-                        Kode OTP
-                      </label>
+                      <label className="text-xs text-gray-500 font-semibold block">Kode OTP</label>
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -1506,150 +1742,155 @@ export default function MediLokaApp() {
                           Verifikasi
                         </button>
                       </div>
-                      <p className="text-[10px] text-gray-400">
-                        *Simulasi saja, kode OTP dianggap selalu benar.
-                      </p>
+                      <p className="text-[10px] text-gray-400">*Simulasi: kode OTP dianggap benar.</p>
                     </div>
                   )}
                 </div>
-              </div>
+              )}
 
-              {/* Step 2: Data pribadi */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
-                <h3 className="text-sm font-bold text-gray-800">2. Data Pribadi Pasien</h3>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-500 font-semibold block mb-1">
-                      Nama Lengkap
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
-                      placeholder="Sesuai KTP / Identitas"
-                      value={registrationForm.fullName}
-                      onChange={(e) =>
-                        setRegistrationForm({ ...registrationForm, fullName: e.target.value })
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-500 font-semibold block mb-1">NIK</label>
-                    <input
-                      type="text"
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
-                      placeholder="16 digit"
-                      value={registrationForm.nik}
-                      onChange={(e) =>
-                        setRegistrationForm({ ...registrationForm, nik: e.target.value })
-                      }
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
+              {/* STEP 2: Data Pribadi Pasien */}
+              {registrationStep === 2 && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                  <h3 className="text-sm font-bold text-gray-800">2. Data Pribadi Pasien</h3>
+                  <div className="space-y-3">
                     <div>
-                      <label className="text-xs text-gray-500 font-semibold block mb-1">
-                        Tanggal Lahir
-                      </label>
+                      <label className="text-xs text-gray-500 font-semibold block mb-1">Nama Lengkap</label>
                       <input
-                        type="date"
+                        type="text"
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
-                        value={registrationForm.dob}
-                        onChange={(e) =>
-                          setRegistrationForm({ ...registrationForm, dob: e.target.value })
-                        }
+                        placeholder="Sesuai KTP / Identitas"
+                        value={registrationForm.fullName}
+                        onChange={(e) => setRegistrationForm({ ...registrationForm, fullName: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 font-semibold block mb-1">
-                        Jenis Kelamin
-                      </label>
-                      <select
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue bg-white"
-                        value={registrationForm.gender}
-                        onChange={(e) =>
-                          setRegistrationForm({ ...registrationForm, gender: e.target.value })
-                        }
-                      >
-                        <option value="Pria">Pria</option>
-                        <option value="Wanita">Wanita</option>
-                      </select>
+                      <label className="text-xs text-gray-500 font-semibold block mb-1">NIK</label>
+                      <input
+                        type="text"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                        placeholder="16 digit"
+                        value={registrationForm.nik}
+                        onChange={(e) => setRegistrationForm({ ...registrationForm, nik: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-500 font-semibold block mb-1">Tanggal Lahir</label>
+                        <input
+                          type="date"
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                          value={registrationForm.dob}
+                          onChange={(e) => setRegistrationForm({ ...registrationForm, dob: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 font-semibold block mb-1">Jenis Kelamin</label>
+                        <select
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue bg-white"
+                          value={registrationForm.gender}
+                          onChange={(e) => setRegistrationForm({ ...registrationForm, gender: e.target.value })}
+                        >
+                          <option value="Pria">Pria</option>
+                          <option value="Wanita">Wanita</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 font-semibold block mb-1">Alamat Domisili</label>
+                      <textarea
+                        rows={3}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue resize-none"
+                        placeholder="Nama jalan, nomor rumah, RT/RW, kecamatan, kota"
+                        value={registrationForm.address}
+                        onChange={(e) => setRegistrationForm({ ...registrationForm, address: e.target.value })}
+                      />
                     </div>
                   </div>
-
-                  <div>
-                    <label className="text-xs text-gray-500 font-semibold block mb-1">
-                      Alamat Domisili
-                    </label>
-                    <textarea
-                      rows={3}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue resize-none"
-                      placeholder="Nama jalan, nomor rumah, RT/RW, kecamatan, kota"
-                      value={registrationForm.address}
-                      onChange={(e) =>
-                        setRegistrationForm({ ...registrationForm, address: e.target.value })
-                      }
-                    />
-                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Step 3: Profil anggota keluarga (opsional) */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
-                <h3 className="text-sm font-bold text-gray-800">
-                  3. Profil Anggota Keluarga (Opsional)
-                </h3>
-                <p className="text-xs text-gray-500">
-                  Anda dapat menambahkan anggota keluarga lain yang akan ikut menggunakan layanan
-                  Edelweiss.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingMember(null);
-                    setNewMemberName('');
-                    setNewMemberRelation('Lainnya');
-                    setShowAddFamilyModal(true);
-                  }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-600 hover:border-edel-blue hover:text-edel-blue transition-colors text-sm font-medium"
-                >
-                  <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
-                    <User size={18} />
-                  </div>
-                  Tambah Profil Anggota Keluarga
-                </button>
-              </div>
+              {/* STEP 3: Profil Anggota Keluarga (Opsional) - form lengkap */}
+              {registrationStep === 3 && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                  <h3 className="text-sm font-bold text-gray-800">3. Profil Anggota Keluarga (Opsional)</h3>
+                  <p className="text-xs text-gray-500">
+                    Tambah anggota keluarga yang akan ikut menggunakan layanan. Isi data lengkap di bawah.
+                  </p>
+                  {familyMembers.map((m) => (
+                    <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
+                      <img src={m.avatar} alt="" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800 text-sm">{m.name}</p>
+                        <p className="text-xs text-gray-500">{m.relation}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingMember(m); setNewMemberName(m.name); setNewMemberRelation(m.relation || 'Lainnya'); setNewMemberNik(m.nik || ''); setNewMemberDob(m.dob || ''); setNewMemberPhone(m.phone || ''); setShowAddFamilyModal(true); }}
+                        className="text-xs font-bold text-edel-blue"
+                      >
+                        Ubah
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => { setEditingMember(null); setNewMemberName(''); setNewMemberRelation('Lainnya'); setNewMemberNik(''); setNewMemberDob(''); setNewMemberPhone(''); setShowAddFamilyModal(true); }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-600 hover:border-edel-blue hover:text-edel-blue transition-colors text-sm font-medium"
+                  >
+                    <User size={18} /> Tambah Anggota Keluarga
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* CTA bawah */}
             <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-              <button
-                onClick={() => {
-                  // Simulasi: buat profil utama dari data registrasi, lalu lanjut ke screen "booking untuk siapa"
-                  const name = registrationForm.fullName.trim() || 'Pasien Baru Edelweiss';
-                  const id = 'reg-' + Date.now();
-                  const mainMember = {
-                    id,
-                    name,
-                    relation: 'Diri Sendiri (Pasien Baru)',
-                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
+              {registrationStep < 3 ? (
+                <div className="flex gap-3">
+                  {registrationStep > 1 && (
+                    <button
+                      onClick={() => setRegistrationStep(registrationStep - 1)}
+                      className="flex-1 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-bold"
+                    >
+                      Kembali
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setRegistrationStep(registrationStep + 1)}
+                    disabled={
+                      (registrationStep === 1 && !otpVerified) ||
+                      (registrationStep === 2 && (!registrationForm.fullName.trim() || !registrationForm.phone.trim()))
+                    }
+                    className={`py-3.5 rounded-xl font-bold bg-edel-pink text-white disabled:opacity-50 disabled:cursor-not-allowed ${registrationStep === 1 ? 'w-full' : 'flex-1'}`}
+                  >
+                    Lanjut
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    const name = registrationForm.fullName.trim() || 'Pasien Baru Edelweiss';
+                    const id = 'reg-' + Date.now();
+                    const mainMember = {
+                      id,
                       name,
-                    )}`,
-                  };
-                  setFamilyMembers((prev) => [...prev, mainMember]);
-                  setBookingFor(mainMember);
-                  setView('booking');
-                }}
-                disabled={
-                  !otpVerified ||
-                  !registrationForm.fullName.trim() ||
-                  !registrationForm.phone.trim()
-                }
-                className="w-full bg-edel-pink hover:bg-[#C21865] text-white font-bold py-3.5 rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Selesai Registrasi & Lanjut Pilih Pasien
-              </button>
+                      relation: 'Diri Sendiri (Pasien Baru)',
+                      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+                    };
+                    setUserProfile({ ...registrationForm });
+                    setIsLoggedIn(true);
+                    setFamilyMembers((prev) => [...prev, mainMember]);
+                    setBookingFor(mainMember);
+                    setRegistrationStep(1);
+                    setRegistrationFromProfile(false);
+                    if (registrationFromProfile) setView('home');
+                    else setView('booking');
+                  }}
+                  disabled={!otpVerified || !registrationForm.fullName.trim() || !registrationForm.phone.trim()}
+                  className="w-full bg-edel-pink hover:bg-[#C21865] text-white font-bold py-3.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Selesai Registrasi {registrationFromProfile ? '& Ke Beranda' : '& Lanjut Pilih Pasien'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1668,6 +1909,9 @@ export default function MediLokaApp() {
                   setShowAddFamilyModal(false);
                   setNewMemberName('');
                   setNewMemberRelation('Lainnya');
+                  setNewMemberNik('');
+                  setNewMemberDob('');
+                  setNewMemberPhone('');
                   setEditingMember(null);
                 }}
                 className="p-1 hover:bg-gray-100 rounded-full"
@@ -1701,49 +1945,75 @@ export default function MediLokaApp() {
                   <option value="Lainnya">Lainnya</option>
                 </select>
               </div>
+              <div>
+                <label className="text-xs text-gray-500 font-semibold block mb-1">NIK (opsional)</label>
+                <input
+                  type="text"
+                  value={newMemberNik}
+                  onChange={(e) => setNewMemberNik(e.target.value)}
+                  placeholder="16 digit"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 outline-none focus:border-edel-blue"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-semibold block mb-1">Tanggal Lahir (opsional)</label>
+                <input
+                  type="date"
+                  value={newMemberDob}
+                  onChange={(e) => setNewMemberDob(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-edel-blue"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-semibold block mb-1">No. HP (opsional)</label>
+                <input
+                  type="tel"
+                  value={newMemberPhone}
+                  onChange={(e) => setNewMemberPhone(e.target.value)}
+                  placeholder="08xxxxxxxxxx"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 outline-none focus:border-edel-blue"
+                />
+              </div>
             </div>
             <button
               onClick={() => {
                 if (!newMemberName.trim()) return;
 
                 if (editingMember) {
-                  // Mode update
                   const updated = {
                     ...editingMember,
                     name: newMemberName.trim(),
                     relation: newMemberRelation,
+                    nik: newMemberNik.trim() || undefined,
+                    dob: newMemberDob || undefined,
+                    phone: newMemberPhone.trim() || undefined,
                   };
-
                   setFamilyMembers((prev) =>
                     prev.map((m) => (m.id === editingMember.id ? updated : m)),
                   );
-
-                  if (bookingFor?.id === editingMember.id) {
-                    setBookingFor(updated);
-                  }
-                  if (selectedFamilyMember?.id === editingMember.id) {
-                    setSelectedFamilyMember(updated);
-                  }
-
+                  if (bookingFor?.id === editingMember.id) setBookingFor(updated);
+                  if (selectedFamilyMember?.id === editingMember.id) setSelectedFamilyMember(updated);
                   setEditingMember(null);
                 } else {
-                  // Mode tambah baru
                   const id = 'custom-' + Date.now();
                   const member = {
                     id,
                     name: newMemberName.trim(),
                     relation: newMemberRelation,
-                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
-                      newMemberName.trim(),
-                    )}`,
+                    nik: newMemberNik.trim() || undefined,
+                    dob: newMemberDob || undefined,
+                    phone: newMemberPhone.trim() || undefined,
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(newMemberName.trim())}`,
                   };
                   setFamilyMembers((prev) => [...prev, member]);
                   setBookingFor(member);
                 }
-
                 setShowAddFamilyModal(false);
                 setNewMemberName('');
                 setNewMemberRelation('Lainnya');
+                setNewMemberNik('');
+                setNewMemberDob('');
+                setNewMemberPhone('');
               }}
               disabled={!newMemberName.trim()}
               className="w-full mt-6 bg-edel-pink hover:bg-edel-pink text-white font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1976,7 +2246,7 @@ export default function MediLokaApp() {
                 onClick={handleFinishProcess}
                 className="w-full bg-edel-pink hover:bg-[#C21865] text-white font-bold py-3.5 rounded-xl shadow-lg transition-all"
               >
-                Selesai & Lihat Riwayat Medis
+                Selesai & Lihat Riwayat Kunjungan
               </button>
             </div>
 
@@ -2001,7 +2271,7 @@ export default function MediLokaApp() {
                   <ChevronLeft size={24} />
                 </button>
               )}
-              <h2 className="text-2xl font-bold">{view === 'success' ? 'Booking Berhasil!' : 'E-Ticket Antrian'}</h2>
+              <h2 className="text-2xl font-bold">{view === 'success' ? 'Booking Berhasil!' : 'E-Ticket'}</h2>
               <p className="text-blue-100 text-sm mt-1">{view === 'success' ? 'Simpan tiket ini untuk check-in.' : 'Tunjukkan QR Code saat Check-in'}</p>
             </div>
 
@@ -2014,12 +2284,13 @@ export default function MediLokaApp() {
                   <div className="absolute -left-3 bottom-[-12px] w-6 h-6 bg-edel-blue rounded-full"></div>
                   <div className="absolute -right-3 bottom-[-12px] w-6 h-6 bg-edel-blue rounded-full"></div>
                   
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Nomor Antrian</p>
-                  <h1 className="text-5xl font-bold text-edel-pink mb-4">{activeBooking.queueNo}</h1>
-                  <div className="bg-gray-100 p-3 rounded-xl inline-block border-2 border-dashed border-gray-300">
-                    <QrCode size={120} className="text-gray-800" />
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Kode Booking</p>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-edel-pink mb-2 break-all">{activeBooking.bookingCode}</h1>
+                  <p className="text-[10px] text-gray-500 mb-3">Check-in di APM untuk mendapatkan nomor antrian</p>
+                  <div className="bg-white p-2 rounded-xl inline-block border-2 border-dashed border-gray-300">
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(activeBooking.bookingCode)}`} alt="QR Code Kode Booking" className="w-[120px] h-[120px]" />
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-2">Kode Booking: {activeBooking.bookingCode}</p>
+                  <p className="text-[10px] text-gray-400 mt-2">Tunjukkan QR Code di Anjungan Mandiri (APM)</p>
                 </div>
 
                 {/* Middle Section: Details */}
@@ -2089,7 +2360,7 @@ export default function MediLokaApp() {
                       </div>
                       <div className="flex-1 pb-2">
                         <h4 className="text-xs font-bold text-edel-blue">Self Check-in (Kiosk)</h4>
-                        <p className="text-xs text-gray-500 mt-1">Scan QR Code di atas pada mesin Anjungan Mandiri (APM) di Lobby Utama untuk cetak struk antrian.</p>
+                        <p className="text-xs text-gray-500 mt-1">Scan Kode Booking / QR Code di Anjungan Mandiri (APM) di Lobby Utama untuk check-in dan cetak nomor antrian.</p>
                       </div>
                    </div>
 
