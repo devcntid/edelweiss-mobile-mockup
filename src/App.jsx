@@ -443,9 +443,9 @@ export default function MediLokaApp() {
               </div>
               
               <h1 className="text-white text-3xl font-bold leading-tight mb-2">
-                Sehat lebih mudah,<br />tanpa antre lama.
+                Sehat lebih mudah<br />
               </h1>
-              <p className="text-blue-50 text-sm font-light">Booking dokter spesialis di Edelweiss Hospital semudah pesan tiket liburan.</p>
+              <p className="text-blue-50 text-sm font-light">Lebih tenang bersama Edelweiss</p>
             </div>
 
             {/* Search Widget */}
