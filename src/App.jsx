@@ -120,6 +120,20 @@ const MEDICAL_RECORDS = {
   ]
 };
 
+// Mock data Hasil Lab (per anggota keluarga)
+const MOCK_LAB_RESULTS = {
+  'self': [
+    { id: 'L101', date: '2024-01-15', title: 'Tes Darah Lengkap', type: 'Darah', status: 'Selesai', hospital: 'RS Edelweiss Bandung', doctor: 'Laboratorium', parameters: [{ name: 'Hemoglobin', value: '14.2 g/dL', status: 'Normal' }, { name: 'Leukosit', value: '7.200 /µL', status: 'Normal' }, { name: 'Trombosit', value: '245.000 /µL', status: 'Normal' }, { name: 'Gula Darah Puasa', value: '92 mg/dL', status: 'Normal' }] },
+    { id: 'L102', date: '2023-11-20', title: 'Urinalisis', type: 'Urine', status: 'Selesai', hospital: 'RS Edelweiss Bandung', doctor: 'Laboratorium', parameters: [{ name: 'Warna', value: 'Kuning jernih', status: 'Normal' }, { name: 'Protein', value: 'Negatif', status: 'Normal' }, { name: 'Glukosa', value: 'Negatif', status: 'Normal' }] },
+  ],
+  'wife': [
+    { id: 'L201', date: '2023-11-20', title: 'Tes Darah Lengkap', type: 'Darah', status: 'Selesai', hospital: 'RS Edelweiss Bandung', doctor: 'Laboratorium', parameters: [{ name: 'Hemoglobin', value: '11.2 g/dL', status: 'Rendah' }, { name: 'Leukosit', value: '6.500 /µL', status: 'Normal' }] },
+  ],
+  'child1': [
+    { id: 'L301', date: '2023-12-05', title: 'Tes Darah (Pra-Vaksin)', type: 'Darah', status: 'Selesai', hospital: 'RS Edelweiss Bandung', doctor: 'Laboratorium', parameters: [{ name: 'Hb', value: '12.0 g/dL', status: 'Normal' }, { name: 'Trombosit', value: '280.000 /µL', status: 'Normal' }] },
+  ],
+};
+
 // Helper untuk generate jadwal random
 const generateSchedules = (baseId) => {
   const schedules = [];
@@ -235,8 +249,13 @@ export default function MediLokaApp() {
     date: new Date(),
   });
 
-  // Pasien Baru vs Pasien Lama (radio: beda wayfinding - pasien baru harus ke admission dulu)
-  const [patientType, setPatientType] = useState('returning'); // 'new' | 'returning'
+  // Pasien Baru vs Pasien Lama (ditentukan ketika pilih slot, untuk beda wayfinding)
+  const [patientType, setPatientType] = useState(null); // 'new' | 'returning'
+
+  // State sementara ketika pilih slot jam, sebelum pilih New / Existing user
+  const [pendingDoctor, setPendingDoctor] = useState(null);
+  const [pendingSchedule, setPendingSchedule] = useState(null);
+  const [showUserTypeModal, setShowUserTypeModal] = useState(false);
 
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
@@ -250,6 +269,19 @@ export default function MediLokaApp() {
   const [familyMembers, setFamilyMembers] = useState(FAMILY_MEMBERS);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRelation, setNewMemberRelation] = useState('Lainnya');
+  const [editingMember, setEditingMember] = useState(null); // null = mode tambah, object = mode update
+
+  // Simulasi registrasi pasien baru (OTP + form)
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [registrationForm, setRegistrationForm] = useState({
+    fullName: '',
+    phone: '',
+    nik: '',
+    dob: '',
+    gender: 'Pria',
+    address: '',
+  });
 
   // Active Booking State (The "My Ticket")
   const [activeBooking, setActiveBooking] = useState(null);
@@ -260,6 +292,9 @@ export default function MediLokaApp() {
   // Medical Records State
   const [selectedFamilyMember, setSelectedFamilyMember] = useState(FAMILY_MEMBERS[0]);
   const [selectedRecord, setSelectedRecord] = useState(null);
+
+  // Hasil Lab State
+  const [selectedLabResult, setSelectedLabResult] = useState(null);
 
   // Filter State
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -468,126 +503,14 @@ export default function MediLokaApp() {
               <p className="text-blue-50 text-sm font-light">Lebih tenang bersama Edelweiss</p>
             </div>
 
-            {/* Pilihan Pasien Baru / Pasien Lama (radio) */}
-            <div className="px-5 -mt-16 mb-4 relative z-10">
-              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-3 ml-1">Saya adalah</p>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="patientType"
-                    value="new"
-                    checked={patientType === 'new'}
-                    onChange={() => setPatientType('new')}
-                    className="w-4 h-4 text-edel-blue border-gray-300 focus:ring-edel-blue"
-                  />
-                  <span className="text-sm font-semibold text-gray-700">Pasien Baru</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="patientType"
-                    value="returning"
-                    checked={patientType === 'returning'}
-                    onChange={() => setPatientType('returning')}
-                    className="w-4 h-4 text-edel-blue border-gray-300 focus:ring-edel-blue"
-                  />
-                  <span className="text-sm font-semibold text-gray-700">Pasien Lama</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Search Widget */}
-            <div className="px-5 mb-6 relative z-10">
-              <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
-                <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
-                  <button className="flex-1 bg-white shadow-sm rounded-lg py-2 text-sm font-bold text-edel-blue text-center">
-                    Kunjungan RS
-                  </button>
-                  <button className="flex-1 py-2 text-sm font-medium text-gray-500 text-center">
-                    Telemedicine
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="relative group">
-                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Lokasi / Rumah Sakit</label>
-                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
-                      <MapPin className="text-edel-blue mr-3" size={20} />
-                      <select 
-                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
-                        value={searchParams.hospital}
-                        onChange={(e) => setSearchParams({...searchParams, hospital: e.target.value})}
-                      >
-                        {HOSPITALS.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                      <ChevronDown size={16} className="text-gray-400" />
-                    </div>
-                  </div>
-
-                  <div className="relative group">
-                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Spesialisasi / Poli</label>
-                    <div className="flex items-center mt-1 border-b-2 border-edel-blue group-focus-within:border-edel-pink py-2 transition-colors">
-                      <Stethoscope className="text-edel-blue mr-3" size={20} />
-                      <select 
-                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
-                        value={searchParams.specialty}
-                        onChange={(e) => setSearchParams({...searchParams, specialty: e.target.value, doctor: 'Semua Dokter'})}
-                      >
-                        {SPECIALTIES.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                      </select>
-                      <ChevronDown size={16} className="text-gray-400" />
-                    </div>
-                  </div>
-
-                  <div className="relative group">
-                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Nama Dokter</label>
-                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
-                      <User className="text-edel-blue mr-3" size={20} />
-                      <select 
-                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
-                        value={searchParams.doctor}
-                        onChange={(e) => setSearchParams({...searchParams, doctor: e.target.value})}
-                      >
-                        {doctorOptionsBySpecialty.map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={16} className="text-gray-400" />
-                    </div>
-                  </div>
-
-                  <div className="relative group">
-                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Tanggal Periksa</label>
-                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
-                      <Calendar className="text-edel-blue mr-3" size={20} />
-                      <input 
-                        type="date" 
-                        className="w-full bg-transparent outline-none text-gray-700 font-semibold"
-                        defaultValue={searchParams.date.toISOString().substr(0, 10)}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={handleSearch}
-                  className="w-full mt-6 bg-edel-pink hover-bg-edel-pink text-white font-bold py-3.5 rounded-xl shadow-lg shadow-pink-200 active:scale-95 transition-transform flex justify-center items-center gap-2"
-                >
-                  <Search size={20} />
-                  Cari Dokter
-                </button>
-              </div>
-            </div>
-
-            {/* ACTIVE TICKET SECTION */}
+            {/* ACTIVE TICKET SECTION (Jadwal Mendatang / Tagihan) — di atas form jika ada */}
             {activeBooking && (
-              <div className="px-5 mb-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="px-5 -mt-16 mb-6 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 
                 {activeBooking.status === 'confirmed' ? (
                   <>
                     <div className="flex justify-between items-center mb-3">
-                       <h3 className="font-bold text-edel-purple">Jadwal Mendatang</h3>
+                       <h3 className="font-bold text-white">Jadwal Mendatang</h3>
                     </div>
                     
                     <button 
@@ -680,10 +603,84 @@ export default function MediLokaApp() {
               </div>
             )}
 
-            {/* MAIN MENU GRID */}
+            {/* Search Widget (form utama) */}
+            <div className={`px-5 relative z-10 ${activeBooking ? 'mb-6' : '-mt-16 mb-6'}`}>
+              <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
+                <div className="space-y-4">
+                  <div className="relative group">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Lokasi / Rumah Sakit</label>
+                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
+                      <MapPin className="text-edel-blue mr-3" size={20} />
+                      <select 
+                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
+                        value={searchParams.hospital}
+                        onChange={(e) => setSearchParams({...searchParams, hospital: e.target.value})}
+                      >
+                        {HOSPITALS.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <ChevronDown size={16} className="text-gray-400" />
+                    </div>
+                  </div>
+
+                  <div className="relative group">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Spesialisasi / Poli</label>
+                    <div className="flex items-center mt-1 border-b-2 border-edel-blue group-focus-within:border-edel-pink py-2 transition-colors">
+                      <Stethoscope className="text-edel-blue mr-3" size={20} />
+                      <select 
+                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
+                        value={searchParams.specialty}
+                        onChange={(e) => setSearchParams({...searchParams, specialty: e.target.value, doctor: 'Semua Dokter'})}
+                      >
+                        {SPECIALTIES.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                      <ChevronDown size={16} className="text-gray-400" />
+                    </div>
+                  </div>
+
+                  <div className="relative group">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Nama Dokter</label>
+                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
+                      <User className="text-edel-blue mr-3" size={20} />
+                      <select 
+                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
+                        value={searchParams.doctor}
+                        onChange={(e) => setSearchParams({...searchParams, doctor: e.target.value})}
+                      >
+                        {doctorOptionsBySpecialty.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={16} className="text-gray-400" />
+                    </div>
+                  </div>
+
+                  <div className="relative group">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Tanggal Periksa</label>
+                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
+                      <Calendar className="text-edel-blue mr-3" size={20} />
+                      <input 
+                        type="date" 
+                        className="w-full bg-transparent outline-none text-gray-700 font-semibold"
+                        defaultValue={searchParams.date.toISOString().substr(0, 10)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleSearch}
+                  className="w-full mt-6 bg-edel-pink hover-bg-edel-pink text-white font-bold py-3.5 rounded-xl shadow-lg shadow-pink-200 active:scale-95 transition-transform flex justify-center items-center gap-2"
+                >
+                  <Search size={20} />
+                  Cari Dokter
+                </button>
+              </div>
+            </div>
+
+            {/* MAIN MENU GRID - Layanan Digital (3 item: Rekam Medis, Tebus Obat, Hasil Lab) */}
             <div className="px-5 mb-6">
-               <h3 className="font-bold text-edel-purple mb-3">Layanan Digital</h3>
-               <div className="grid grid-cols-4 gap-4">
+               
+               <div className="grid grid-cols-2 gap-4">
                   <button 
                     onClick={() => setView('medical_records')}
                     className="flex flex-col items-center gap-2 group"
@@ -693,37 +690,16 @@ export default function MediLokaApp() {
                     </div>
                     <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-purple">Rekam<br/>Medis</span>
                   </button>
-                  <button className="flex flex-col items-center gap-2 group">
-                    <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-edel-blue border border-blue-100 group-hover:bg-edel-blue group-hover:text-white transition-colors">
-                      <Pill size={24} />
-                    </div>
-                    <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-blue">Tebus<br/>Obat</span>
-                  </button>
-                  <button className="flex flex-col items-center gap-2 group">
+                  <button 
+                    onClick={() => setView('lab_results')}
+                    className="flex flex-col items-center gap-2 group"
+                  >
                     <div className="w-14 h-14 bg-pink-50 rounded-2xl flex items-center justify-center text-edel-pink border border-pink-100 group-hover:bg-edel-pink group-hover:text-white transition-colors">
                       <Microscope size={24} />
                     </div>
                     <span className="text-xs text-center font-medium text-gray-600 group-hover:text-edel-pink">Hasil<br/>Lab</span>
                   </button>
-                   <button className="flex flex-col items-center gap-2 group">
-                    <div className="w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-100 group-hover:bg-orange-500 group-hover:text-white transition-colors">
-                      <Car size={24} />
-                    </div>
-                    <span className="text-xs text-center font-medium text-gray-600 group-hover:text-orange-500">Ambulans</span>
-                  </button>
                </div>
-            </div>
-
-            {/* Recent Searches */}
-            <div className="px-5">
-              <h3 className="font-bold text-edel-purple mb-3">Pencarian Terakhir</h3>
-              <div className="flex gap-3 overflow-x-auto pb-4 hide-scrollbar">
-                <div className="min-w-[140px] bg-white border border-gray-100 p-3 rounded-xl shadow-sm">
-                  <span className="text-xs text-edel-pink font-bold">Kandungan</span>
-                  <p className="text-xs text-gray-500 mt-1">RS Edelweiss Bdg</p>
-                  <p className="text-xs text-gray-400">Kemarin</p>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -737,13 +713,28 @@ export default function MediLokaApp() {
               <button onClick={() => setView('home')} className="text-gray-700 hover:bg-gray-100 p-2 rounded-full">
                 <ChevronLeft size={24} />
               </button>
-              <h2 className="font-bold text-lg text-edel-purple">Rekam Medis</h2>
+              <div className="flex-1 flex items-center justify-between gap-2">
+                <h2 className="font-bold text-lg text-edel-purple">Riwayat Kunjungan</h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedFamilyMember) return;
+                    setEditingMember(selectedFamilyMember);
+                    setNewMemberName(selectedFamilyMember.name);
+                    setNewMemberRelation(selectedFamilyMember.relation || 'Lainnya');
+                    setShowAddFamilyModal(true);
+                  }}
+                  className="text-xs font-semibold text-edel-blue px-3 py-1 rounded-full border border-edel-blue/20 hover:bg-blue-50"
+                >
+                  Ubah Profil
+                </button>
+              </div>
             </div>
 
-            {/* Family Selector */}
+            {/* Family Selector (pakai state familyMembers agar bisa add/update) */}
             <div className="p-4 bg-white border-b border-gray-100 overflow-x-auto hide-scrollbar">
               <div className="flex gap-4">
-                {FAMILY_MEMBERS.map(member => (
+                {familyMembers.map(member => (
                   <button 
                     key={member.id}
                     onClick={() => setSelectedFamilyMember(member)}
@@ -797,7 +788,7 @@ export default function MediLokaApp() {
 
                     <div className="mt-3 pl-2 pt-3 border-t border-gray-50 flex gap-2">
                       <span className="flex-1 bg-blue-50 text-center text-xs text-edel-blue py-2 rounded-lg font-bold transition-colors">
-                        Lihat Detail Rekam Medis
+                        Lihat Detail  Kunjungan
                       </span>
                     </div>
                  </button>
@@ -813,6 +804,129 @@ export default function MediLokaApp() {
         </div>
       )}
 
+      {/* --- HASIL LAB VIEW --- */}
+      {view === 'lab_results' && (
+        <div className="w-full min-h-screen bg-white flex justify-center">
+          <div className="w-full max-w-md bg-white min-h-screen flex flex-col relative">
+            <div className="bg-white p-4 shadow-sm flex items-center gap-3 sticky top-0 z-20 border-b border-gray-100">
+              <button onClick={() => setView('home')} className="text-gray-700 hover:bg-gray-100 p-2 rounded-full">
+                <ChevronLeft size={24} />
+              </button>
+              <h2 className="font-bold text-lg text-edel-purple">Hasil Lab</h2>
+            </div>
+
+            {/* Family Selector */}
+            <div className="p-4 bg-white border-b border-gray-100 overflow-x-auto hide-scrollbar">
+              <div className="flex gap-4">
+                {familyMembers.map(member => (
+                  <button
+                    key={member.id}
+                    onClick={() => setSelectedFamilyMember(member)}
+                    className={`flex flex-col items-center gap-2 min-w-[70px] transition-all ${selectedFamilyMember.id === member.id ? 'opacity-100 scale-105' : 'opacity-50 grayscale hover:opacity-80'}`}
+                  >
+                    <div className={`w-14 h-14 rounded-full p-0.5 ${selectedFamilyMember.id === member.id ? 'bg-gradient-to-tr from-edel-blue to-edel-pink' : 'bg-transparent'}`}>
+                      <img src={member.avatar} className="w-full h-full rounded-full border-2 border-white bg-gray-100" alt="" />
+                    </div>
+                    <span className={`text-xs font-bold ${selectedFamilyMember.id === member.id ? 'text-edel-purple' : 'text-gray-500'}`}>{member.relation}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Daftar Hasil Lab */}
+            <div className="p-5 space-y-4 pb-20">
+              <h3 className="font-bold text-gray-700">Riwayat Hasil Pemeriksaan Lab</h3>
+
+              {(MOCK_LAB_RESULTS[selectedFamilyMember?.id] ?? []).length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-2xl border border-gray-100">
+                  <div className="w-16 h-16 bg-pink-50 rounded-full flex items-center justify-center mx-auto mb-3 text-edel-pink">
+                    <Microscope size={28} />
+                  </div>
+                  <p className="text-gray-500 text-sm font-medium">Belum ada hasil lab</p>
+                  <p className="text-xs text-gray-400 mt-1">Hasil pemeriksaan lab akan muncul di sini</p>
+                </div>
+              ) : (
+                (MOCK_LAB_RESULTS[selectedFamilyMember?.id] ?? []).map((lab) => (
+                  <button
+                    key={lab.id}
+                    type="button"
+                    onClick={() => setSelectedLabResult(lab)}
+                    className="w-full text-left bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:border-edel-pink hover:shadow-md transition-all"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 bg-pink-50 rounded-xl flex items-center justify-center text-edel-pink flex-shrink-0">
+                        <Microscope size={20} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-gray-800 text-sm">{lab.title}</h4>
+                        <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                          <Calendar size={12} /> {formatDate(new Date(lab.date))}
+                        </p>
+                        <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                          <MapPin size={12} /> {lab.hospital}
+                        </p>
+                        <span className="inline-block mt-2 text-[10px] font-bold px-2 py-0.5 rounded bg-green-100 text-green-700">
+                          {lab.status}
+                        </span>
+                      </div>
+                      <ChevronRight size={20} className="text-gray-400 flex-shrink-0" />
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- HASIL LAB DETAIL VIEW --- */}
+      {view === 'lab_results' && selectedLabResult && (
+        <div className="fixed inset-0 z-40 bg-white max-w-md mx-auto overflow-y-auto">
+          <div className="p-4 border-b border-gray-100 flex items-center gap-3 sticky top-0 bg-white z-10">
+            <button
+              onClick={() => setSelectedLabResult(null)}
+              className="text-gray-700 hover:bg-gray-100 p-2 rounded-full"
+            >
+              <ChevronLeft size={24} />
+            </button>
+            <h2 className="font-bold text-lg text-edel-purple truncate">Detail Hasil Lab</h2>
+          </div>
+          <div className="p-5 pb-20">
+            <div className="bg-pink-50 border border-pink-100 rounded-2xl p-4 mb-6">
+              <h3 className="font-bold text-gray-800">{selectedLabResult.title}</h3>
+              <p className="text-xs text-gray-600 mt-1">{selectedLabResult.type} • {formatDate(new Date(selectedLabResult.date))}</p>
+              <p className="text-xs text-gray-500 mt-1">{selectedLabResult.hospital}</p>
+              <span className="inline-block mt-2 text-[10px] font-bold px-2 py-0.5 rounded bg-green-100 text-green-700">
+                {selectedLabResult.status}
+              </span>
+            </div>
+
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Parameter Hasil</h4>
+            <div className="space-y-2 mb-6">
+              {selectedLabResult.parameters?.map((param, idx) => (
+                <div key={idx} className="flex justify-between items-center bg-white border border-gray-100 rounded-xl px-4 py-3">
+                  <span className="text-sm text-gray-800">{param.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold ${param.status === 'Normal' ? 'text-gray-800' : 'text-amber-600'}`}>{param.value}</span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${param.status === 'Normal' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                      {param.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="w-full flex items-center justify-center gap-2 bg-edel-pink text-white font-bold py-3 rounded-xl"
+            >
+              <Download size={20} />
+              Unduh Hasil Lab (PDF)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* --- RECORD DETAIL VIEW (NEW) --- */}
       {view === 'record_detail' && selectedRecord && (
         <div className="w-full min-h-screen bg-white flex justify-center">
@@ -821,7 +935,7 @@ export default function MediLokaApp() {
               <button onClick={() => setView('medical_records')} className="text-gray-700 hover:bg-gray-100 p-2 rounded-full">
                 <ChevronLeft size={24} />
               </button>
-              <h2 className="font-bold text-lg text-edel-purple">Detail Rekam Medis</h2>
+              <h2 className="font-bold text-lg text-edel-purple">Detail Kunjungan</h2>
             </div>
             
             <div className="p-5 overflow-y-auto pb-32">
@@ -1047,9 +1161,9 @@ export default function MediLokaApp() {
                               key={sch.id}
                               onClick={() => {
                                 setIsWaitingList(sch.booked >= 4);
-                                setSelectedDoctor(doc);
-                                setSelectedSchedule(sch);
-                                setView('booking');
+                                setPendingDoctor(doc);
+                                setPendingSchedule(sch);
+                                setShowUserTypeModal(true);
                               }}
                               className={`flex flex-col items-center justify-center px-3 py-1.5 rounded-lg border transition-all ${bgClass}`}
                             >
@@ -1131,6 +1245,88 @@ export default function MediLokaApp() {
         </div>
       )}
 
+      {/* Modal pilih tipe pengguna (Simulasi Pasien Baru vs Existing) */}
+      {showUserTypeModal && pendingDoctor && pendingSchedule && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg text-edel-purple">Lanjutkan sebagai?</h3>
+              <button
+                onClick={() => {
+                  setShowUserTypeModal(false);
+                  setPendingDoctor(null);
+                  setPendingSchedule(null);
+                }}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4">
+              Pilih jenis pengguna untuk simulasi alur yang berbeda.
+            </p>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  // Existing user: langsung ke konfirmasi booking seperti sekarang
+                  setPatientType('returning');
+                  setSelectedDoctor(pendingDoctor);
+                  setSelectedSchedule(pendingSchedule);
+                  setShowUserTypeModal(false);
+                  setPendingDoctor(null);
+                  setPendingSchedule(null);
+                  setView('booking');
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-edel-blue bg-blue-50 text-edel-blue font-bold text-sm hover:bg-blue-100 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-edel-blue text-white flex items-center justify-center">
+                  <User size={20} />
+                </div>
+                <div className="text-left">
+                  <p>Simulasi Existing User</p>
+                  <p className="text-[11px] font-normal text-gray-600">Langsung pilih &quot;booking untuk siapa&quot; seperti flow sekarang.</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  // New user: arahkan ke halaman registrasi (OTP + data pribadi)
+                  setPatientType('new');
+                  setSelectedDoctor(pendingDoctor);
+                  setSelectedSchedule(pendingSchedule);
+                  setShowUserTypeModal(false);
+                  setPendingDoctor(null);
+                  setPendingSchedule(null);
+                  // reset form registrasi
+                  setOtpSent(false);
+                  setOtpVerified(false);
+                  setRegistrationForm({
+                    fullName: '',
+                    phone: '',
+                    nik: '',
+                    dob: '',
+                    gender: 'Pria',
+                    address: '',
+                  });
+                  setView('registration');
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 bg-white text-gray-700 font-bold text-sm hover:border-edel-pink hover:bg-pink-50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-pink-50 text-edel-pink flex items-center justify-center">
+                  <ClipboardList size={20} />
+                </div>
+                <div className="text-left">
+                  <p>Simulasi New User</p>
+                  <p className="text-[11px] font-normal text-gray-600">Login OTP, isi form registrasi & tambah profil keluarga terlebih dahulu.</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- BOOKING CONFIRMATION --- */}
       {view === 'booking' && selectedDoctor && selectedSchedule && (
         <div className="w-full min-h-screen bg-white flex justify-center">
@@ -1194,7 +1390,12 @@ export default function MediLokaApp() {
                     ))}
                     <button
                       type="button"
-                      onClick={() => setShowAddFamilyModal(true)}
+                      onClick={() => {
+                        setEditingMember(null);
+                        setNewMemberName('');
+                        setNewMemberRelation('Lainnya');
+                        setShowAddFamilyModal(true);
+                      }}
                       className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 hover:border-edel-blue hover:text-edel-blue transition-all"
                     >
                       <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
@@ -1219,13 +1420,258 @@ export default function MediLokaApp() {
         </div>
       )}
 
-      {/* Modal Tambah Anggota Keluarga */}
+      {/* --- REGISTRATION VIEW (NEW USER FLOW) --- */}
+      {view === 'registration' && selectedDoctor && selectedSchedule && (
+        <div className="w-full min-h-screen bg-white flex justify-center">
+          <div className="w-full max-w-md bg-white min-h-screen flex flex-col relative">
+            <div className="bg-white p-4 shadow-sm flex items-center gap-3 sticky top-0 z-20 border-b border-gray-100">
+              <button
+                onClick={() => {
+                  // kembali ke hasil pencarian jika batal
+                  setView('search');
+                }}
+                className="text-gray-700 hover:bg-gray-100 p-2 rounded-full"
+              >
+                <ChevronLeft size={24} />
+              </button>
+              <h2 className="font-bold text-lg text-edel-purple">Registrasi Pasien Baru</h2>
+            </div>
+
+            <div className="p-5 overflow-y-auto pb-32 space-y-5">
+              {/* Ringkasan dokter & jadwal yang dipilih */}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 items-start">
+                <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center">
+                  <Stethoscope size={20} className="text-edel-blue" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-blue-700 font-semibold uppercase tracking-wider mb-1">
+                    Anda sedang mendaftar untuk
+                  </p>
+                  <p className="text-sm font-bold text-gray-800">{selectedDoctor.name}</p>
+                  <p className="text-xs text-edel-blue font-semibold">{selectedDoctor.specialty}</p>
+                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                    <Calendar size={12} /> {formatDate(searchParams.date)} • {selectedSchedule.startTime} - {selectedSchedule.endTime}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 1: Login OTP */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-gray-800">1. Verifikasi No. HP (OTP)</h3>
+                  {otpVerified && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+                      <CheckCircle2 size={14} /> Terverifikasi
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs text-gray-500 font-semibold block">No. Handphone</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="tel"
+                      className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                      placeholder="08xxxxxxxxxx"
+                      value={registrationForm.phone}
+                      onChange={(e) =>
+                        setRegistrationForm({ ...registrationForm, phone: e.target.value })
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setOtpSent(true)}
+                      className="px-3 py-2 rounded-lg bg-edel-blue text-white text-xs font-bold whitespace-nowrap"
+                    >
+                      Kirim OTP
+                    </button>
+                  </div>
+                  {otpSent && (
+                    <div className="mt-2 space-y-1">
+                      <label className="text-xs text-gray-500 font-semibold block">
+                        Kode OTP
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={6}
+                          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm tracking-[0.3em] text-center outline-none focus:border-edel-blue"
+                          placeholder="••••••"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setOtpVerified(true)}
+                          className="px-3 py-2 rounded-lg bg-edel-pink text-white text-xs font-bold whitespace-nowrap"
+                        >
+                          Verifikasi
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-gray-400">
+                        *Simulasi saja, kode OTP dianggap selalu benar.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Step 2: Data pribadi */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                <h3 className="text-sm font-bold text-gray-800">2. Data Pribadi Pasien</h3>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-500 font-semibold block mb-1">
+                      Nama Lengkap
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                      placeholder="Sesuai KTP / Identitas"
+                      value={registrationForm.fullName}
+                      onChange={(e) =>
+                        setRegistrationForm({ ...registrationForm, fullName: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-500 font-semibold block mb-1">NIK</label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                      placeholder="16 digit"
+                      value={registrationForm.nik}
+                      onChange={(e) =>
+                        setRegistrationForm({ ...registrationForm, nik: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500 font-semibold block mb-1">
+                        Tanggal Lahir
+                      </label>
+                      <input
+                        type="date"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue"
+                        value={registrationForm.dob}
+                        onChange={(e) =>
+                          setRegistrationForm({ ...registrationForm, dob: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 font-semibold block mb-1">
+                        Jenis Kelamin
+                      </label>
+                      <select
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue bg-white"
+                        value={registrationForm.gender}
+                        onChange={(e) =>
+                          setRegistrationForm({ ...registrationForm, gender: e.target.value })
+                        }
+                      >
+                        <option value="Pria">Pria</option>
+                        <option value="Wanita">Wanita</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-500 font-semibold block mb-1">
+                      Alamat Domisili
+                    </label>
+                    <textarea
+                      rows={3}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-edel-blue resize-none"
+                      placeholder="Nama jalan, nomor rumah, RT/RW, kecamatan, kota"
+                      value={registrationForm.address}
+                      onChange={(e) =>
+                        setRegistrationForm({ ...registrationForm, address: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 3: Profil anggota keluarga (opsional) */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+                <h3 className="text-sm font-bold text-gray-800">
+                  3. Profil Anggota Keluarga (Opsional)
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Anda dapat menambahkan anggota keluarga lain yang akan ikut menggunakan layanan
+                  Edelweiss.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMember(null);
+                    setNewMemberName('');
+                    setNewMemberRelation('Lainnya');
+                    setShowAddFamilyModal(true);
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-600 hover:border-edel-blue hover:text-edel-blue transition-colors text-sm font-medium"
+                >
+                  <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+                    <User size={18} />
+                  </div>
+                  Tambah Profil Anggota Keluarga
+                </button>
+              </div>
+            </div>
+
+            {/* CTA bawah */}
+            <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+              <button
+                onClick={() => {
+                  // Simulasi: buat profil utama dari data registrasi, lalu lanjut ke screen "booking untuk siapa"
+                  const name = registrationForm.fullName.trim() || 'Pasien Baru Edelweiss';
+                  const id = 'reg-' + Date.now();
+                  const mainMember = {
+                    id,
+                    name,
+                    relation: 'Diri Sendiri (Pasien Baru)',
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
+                      name,
+                    )}`,
+                  };
+                  setFamilyMembers((prev) => [...prev, mainMember]);
+                  setBookingFor(mainMember);
+                  setView('booking');
+                }}
+                disabled={
+                  !otpVerified ||
+                  !registrationForm.fullName.trim() ||
+                  !registrationForm.phone.trim()
+                }
+                className="w-full bg-edel-pink hover:bg-[#C21865] text-white font-bold py-3.5 rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Selesai Registrasi & Lanjut Pilih Pasien
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tambah / Ubah Anggota Keluarga */}
       {showAddFamilyModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 animate-in slide-in-from-bottom duration-300">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg text-edel-purple">Tambah Profil Pasien</h3>
-              <button onClick={() => { setShowAddFamilyModal(false); setNewMemberName(''); setNewMemberRelation('Lainnya'); }} className="p-1 hover:bg-gray-100 rounded-full">
+              <h3 className="font-bold text-lg text-edel-purple">
+                {editingMember ? 'Ubah Profil Pasien' : 'Tambah Profil Pasien'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowAddFamilyModal(false);
+                  setNewMemberName('');
+                  setNewMemberRelation('Lainnya');
+                  setEditingMember(null);
+                }}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -1259,15 +1705,42 @@ export default function MediLokaApp() {
             <button
               onClick={() => {
                 if (!newMemberName.trim()) return;
-                const id = 'custom-' + Date.now();
-                const member = {
-                  id,
-                  name: newMemberName.trim(),
-                  relation: newMemberRelation,
-                  avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(newMemberName.trim())}`,
-                };
-                setFamilyMembers((prev) => [...prev, member]);
-                setBookingFor(member);
+
+                if (editingMember) {
+                  // Mode update
+                  const updated = {
+                    ...editingMember,
+                    name: newMemberName.trim(),
+                    relation: newMemberRelation,
+                  };
+
+                  setFamilyMembers((prev) =>
+                    prev.map((m) => (m.id === editingMember.id ? updated : m)),
+                  );
+
+                  if (bookingFor?.id === editingMember.id) {
+                    setBookingFor(updated);
+                  }
+                  if (selectedFamilyMember?.id === editingMember.id) {
+                    setSelectedFamilyMember(updated);
+                  }
+
+                  setEditingMember(null);
+                } else {
+                  // Mode tambah baru
+                  const id = 'custom-' + Date.now();
+                  const member = {
+                    id,
+                    name: newMemberName.trim(),
+                    relation: newMemberRelation,
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
+                      newMemberName.trim(),
+                    )}`,
+                  };
+                  setFamilyMembers((prev) => [...prev, member]);
+                  setBookingFor(member);
+                }
+
                 setShowAddFamilyModal(false);
                 setNewMemberName('');
                 setNewMemberRelation('Lainnya');
@@ -1275,7 +1748,7 @@ export default function MediLokaApp() {
               disabled={!newMemberName.trim()}
               className="w-full mt-6 bg-edel-pink hover:bg-edel-pink text-white font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Simpan Profil
+              {editingMember ? 'Simpan Perubahan' : 'Simpan Profil'}
             </button>
           </div>
         </div>
