@@ -231,14 +231,25 @@ export default function MediLokaApp() {
   const [searchParams, setSearchParams] = useState({
     hospital: 'Semua Rumah Sakit',
     specialty: 'Semua Spesialis',
+    doctor: 'Semua Dokter',
     date: new Date(),
   });
-  
+
+  // Pasien Baru vs Pasien Lama (radio: beda wayfinding - pasien baru harus ke admission dulu)
+  const [patientType, setPatientType] = useState('returning'); // 'new' | 'returning'
+
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(PAYMENT_METHODS[0].id);
   const [isWaitingList, setIsWaitingList] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+
+  // Booking untuk siapa (diri sendiri / istri / anak / anggota keluarga)
+  const [bookingFor, setBookingFor] = useState(FAMILY_MEMBERS[0]);
+  const [showAddFamilyModal, setShowAddFamilyModal] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState(FAMILY_MEMBERS);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberRelation, setNewMemberRelation] = useState('Lainnya');
 
   // Active Booking State (The "My Ticket")
   const [activeBooking, setActiveBooking] = useState(null);
@@ -255,7 +266,6 @@ export default function MediLokaApp() {
   const [filters, setFilters] = useState({
     period: [], 
     gender: 'all', 
-    priceMax: 1000000,
     sort: 'availability' 
   });
 
@@ -291,7 +301,9 @@ export default function MediLokaApp() {
         hospital: searchParams.hospital === "Semua Rumah Sakit" ? selectedDoctor.hospital : searchParams.hospital,
         bookingCode: 'EDL-' + Math.floor(100000 + Math.random() * 900000),
         queueNo: 'A-' + Math.floor(Math.random() * 20),
-        status: 'confirmed', 
+        status: 'confirmed',
+        patient: bookingFor,
+        patientType,
         billing: null
       });
       setView('success'); 
@@ -366,12 +378,19 @@ export default function MediLokaApp() {
     });
   };
 
+  // Daftar nama dokter per spesialisasi (untuk dropdown di home)
+  const doctorOptionsBySpecialty = useMemo(() => {
+    if (searchParams.specialty === 'Semua Spesialis') return ['Semua Dokter'];
+    const names = [...new Set(MOCK_DOCTORS.filter(d => d.specialty === searchParams.specialty).map(d => d.name))];
+    return ['Semua Dokter', ...names.sort()];
+  }, [searchParams.specialty]);
+
   const filteredDoctors = useMemo(() => {
     let docs = MOCK_DOCTORS.filter(doc => {
       if (searchParams.hospital !== "Semua Rumah Sakit" && doc.hospital !== searchParams.hospital) return false;
       if (searchParams.specialty !== "Semua Spesialis" && doc.specialty !== searchParams.specialty) return false;
+      if (searchParams.doctor !== "Semua Dokter" && doc.name !== searchParams.doctor) return false;
       if (filters.gender !== 'all' && doc.gender !== filters.gender) return false;
-      if (doc.price > filters.priceMax) return false;
       if (filters.period.length > 0) {
         const hasMatchingSchedule = doc.schedules.some(sch => filters.period.includes(sch.period));
         if (!hasMatchingSchedule) return false;
@@ -379,8 +398,9 @@ export default function MediLokaApp() {
       return true;
     });
 
-    if (filters.sort === 'price_asc') docs.sort((a, b) => a.price - b.price);
-    else if (filters.sort === 'price_desc') docs.sort((a, b) => b.price - a.price);
+    if (filters.sort === 'availability') {
+      docs.sort((a, b) => (b.schedules?.length || 0) - (a.schedules?.length || 0));
+    }
 
     return docs;
   }, [searchParams, filters]);
@@ -448,8 +468,37 @@ export default function MediLokaApp() {
               <p className="text-blue-50 text-sm font-light">Lebih tenang bersama Edelweiss</p>
             </div>
 
+            {/* Pilihan Pasien Baru / Pasien Lama (radio) */}
+            <div className="px-5 -mt-16 mb-4 relative z-10">
+              <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-3 ml-1">Saya adalah</p>
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="patientType"
+                    value="new"
+                    checked={patientType === 'new'}
+                    onChange={() => setPatientType('new')}
+                    className="w-4 h-4 text-edel-blue border-gray-300 focus:ring-edel-blue"
+                  />
+                  <span className="text-sm font-semibold text-gray-700">Pasien Baru</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="patientType"
+                    value="returning"
+                    checked={patientType === 'returning'}
+                    onChange={() => setPatientType('returning')}
+                    className="w-4 h-4 text-edel-blue border-gray-300 focus:ring-edel-blue"
+                  />
+                  <span className="text-sm font-semibold text-gray-700">Pasien Lama</span>
+                </label>
+              </div>
+            </div>
+
             {/* Search Widget */}
-            <div className="px-5 -mt-16 mb-6 relative z-10">
+            <div className="px-5 mb-6 relative z-10">
               <div className="bg-white rounded-2xl shadow-lg p-5 border border-gray-100">
                 <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
                   <button className="flex-1 bg-white shadow-sm rounded-lg py-2 text-sm font-bold text-edel-blue text-center">
@@ -483,9 +532,26 @@ export default function MediLokaApp() {
                       <select 
                         className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
                         value={searchParams.specialty}
-                        onChange={(e) => setSearchParams({...searchParams, specialty: e.target.value})}
+                        onChange={(e) => setSearchParams({...searchParams, specialty: e.target.value, doctor: 'Semua Dokter'})}
                       >
                         {SPECIALTIES.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                      <ChevronDown size={16} className="text-gray-400" />
+                    </div>
+                  </div>
+
+                  <div className="relative group">
+                    <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider ml-1">Nama Dokter</label>
+                    <div className="flex items-center mt-1 border-b-2 border-gray-100 group-focus-within:border-edel-blue py-2 transition-colors">
+                      <User className="text-edel-blue mr-3" size={20} />
+                      <select 
+                        className="w-full bg-transparent outline-none text-gray-700 font-semibold appearance-none"
+                        value={searchParams.doctor}
+                        onChange={(e) => setSearchParams({...searchParams, doctor: e.target.value})}
+                      >
+                        {doctorOptionsBySpecialty.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
                       </select>
                       <ChevronDown size={16} className="text-gray-400" />
                     </div>
@@ -862,7 +928,8 @@ export default function MediLokaApp() {
                     {searchParams.specialty === "Semua Spesialis" ? "Dokter" : searchParams.specialty}
                   </div>
                   <div className="text-blue-100 text-xs">
-                    {formatDate(searchParams.date)} • 1 Pasien
+                    {formatDate(searchParams.date)}
+                    {searchParams.doctor !== 'Semua Dokter' && ` • ${searchParams.doctor}`}
                   </div>
                 </div>
                 <button className="text-white p-2">
@@ -1046,8 +1113,6 @@ export default function MediLokaApp() {
                         className="w-full border border-gray-200 rounded-lg p-2 text-sm outline-none focus:border-edel-blue"
                       >
                         <option value="availability">Ketersediaan Terbanyak</option>
-                        <option value="price_asc">Harga Terendah</option>
-                        <option value="price_desc">Harga Tertinggi</option>
                       </select>
                     </div>
                   </div>
@@ -1103,18 +1168,42 @@ export default function MediLokaApp() {
                       </div>
                     </div>
                 </div>
-                
-                 {/* Estimasi Biaya (Bukan Final) */}
-                 <div className="bg-white rounded-xl shadow-md border border-gray-100 p-4">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">Estimasi Biaya Awal</h3>
-                    <div className="border-t border-dashed border-gray-300 my-2 pt-2 flex justify-between items-center">
-                      <span className="font-bold text-gray-800">Mulai dari</span>
-                      <span className="font-bold text-edel-pink text-lg">{formatCurrency(selectedDoctor.price)}</span>
-                    </div>
-                    <p className="text-[10px] text-gray-500 mt-2">
-                       *Ini hanya estimasi konsultasi awal. Pembayaran dilakukan di Kasir setelah pemeriksaan selesai bersamaan dengan biaya obat/tindakan.
-                    </p>
-                 </div>
+
+                {/* Booking untuk siapa */}
+                <div className="bg-white rounded-xl shadow-md border border-gray-100 p-4 mb-6">
+                  <h3 className="text-sm font-bold text-gray-700 mb-3">Booking untuk siapa?</h3>
+                  <div className="space-y-2">
+                    {familyMembers.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => setBookingFor(member)}
+                        className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${bookingFor?.id === member.id ? 'border-edel-blue bg-blue-50' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}
+                      >
+                        <img src={member.avatar} alt="" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-800 text-sm">{member.name}</p>
+                          <p className="text-xs text-gray-500">{member.relation}</p>
+                        </div>
+                        {bookingFor?.id === member.id && (
+                          <div className="w-5 h-5 rounded-full bg-edel-blue flex items-center justify-center">
+                            <CheckCircle2 size={12} className="text-white" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setShowAddFamilyModal(true)}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-500 hover:border-edel-blue hover:text-edel-blue transition-all"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                        <User size={20} />
+                      </div>
+                      <span className="font-medium text-sm">Tambah anggota keluarga / profil</span>
+                    </button>
+                  </div>
+                </div>
              </div>
 
             <div className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
@@ -1126,6 +1215,68 @@ export default function MediLokaApp() {
                 {isPaying ? 'Memproses...' : (isWaitingList ? 'Masuk Waiting List' : 'Konfirmasi (Bayar Pasca Periksa)')}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tambah Anggota Keluarga */}
+      {showAddFamilyModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg text-edel-purple">Tambah Profil Pasien</h3>
+              <button onClick={() => { setShowAddFamilyModal(false); setNewMemberName(''); setNewMemberRelation('Lainnya'); }} className="p-1 hover:bg-gray-100 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-gray-500 font-semibold block mb-1">Nama Lengkap</label>
+                <input
+                  type="text"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  placeholder="Contoh: Ahmad Fauzi"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 outline-none focus:border-edel-blue"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-semibold block mb-1">Hubungan</label>
+                <select
+                  value={newMemberRelation}
+                  onChange={(e) => setNewMemberRelation(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-edel-blue bg-white"
+                >
+                  <option value="Diri Sendiri">Diri Sendiri</option>
+                  <option value="Istri">Istri</option>
+                  <option value="Suami">Suami</option>
+                  <option value="Anak">Anak</option>
+                  <option value="Orang Tua">Orang Tua</option>
+                  <option value="Lainnya">Lainnya</option>
+                </select>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                if (!newMemberName.trim()) return;
+                const id = 'custom-' + Date.now();
+                const member = {
+                  id,
+                  name: newMemberName.trim(),
+                  relation: newMemberRelation,
+                  avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(newMemberName.trim())}`,
+                };
+                setFamilyMembers((prev) => [...prev, member]);
+                setBookingFor(member);
+                setShowAddFamilyModal(false);
+                setNewMemberName('');
+                setNewMemberRelation('Lainnya');
+              }}
+              disabled={!newMemberName.trim()}
+              className="w-full mt-6 bg-edel-pink hover:bg-edel-pink text-white font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Simpan Profil
+            </button>
           </div>
         </div>
       )}
@@ -1400,6 +1551,13 @@ export default function MediLokaApp() {
 
                 {/* Middle Section: Details */}
                 <div className="p-6 bg-gray-50">
+                   {activeBooking.patient && (
+                     <div className="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                       <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Booking untuk</p>
+                       <p className="font-bold text-gray-800">{activeBooking.patient.name}</p>
+                       <p className="text-xs text-gray-500">{activeBooking.patient.relation}</p>
+                     </div>
+                   )}
                    <div className="flex gap-4 mb-4">
                       <img 
                         src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeBooking.doctor.name}&backgroundColor=b6e3f4`} 
@@ -1416,13 +1574,13 @@ export default function MediLokaApp() {
                    </div>
                 </div>
 
-                {/* Bottom Section: Wayfinding */}
+                {/* Bottom Section: Wayfinding (pasien baru: wajib ke Admission dulu; pasien lama: tidak) */}
                 <div className="bg-white p-6 border-t border-gray-100">
                    <h3 className="text-sm font-bold text-edel-purple mb-6 flex items-center gap-2">
                      <MapPin size={16} /> Alur Pasien (Wayfinding)
                    </h3>
                    
-                   {/* Step 1: Parkir */}
+                   {/* Step 0: Parkir */}
                    <div className="flex gap-4 mb-6 relative">
                       <div className="flex flex-col items-center">
                         <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-bold z-10 border border-gray-200">
@@ -1436,10 +1594,24 @@ export default function MediLokaApp() {
                       </div>
                    </div>
 
-                   {/* Step 2: Check In */}
+                   {/* Step khusus Pasien Baru: Loket Pendaftaran (Admission) */}
+                   {activeBooking.patientType === 'new' && (
+                     <div className="flex gap-4 mb-6 relative">
+                        <div className="flex flex-col items-center">
+                          <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-amber-50">1</div>
+                          <div className="w-0.5 flex-1 bg-gray-200 my-1"></div>
+                        </div>
+                        <div className="flex-1 pb-2">
+                          <h4 className="text-xs font-bold text-amber-700">Loket Pendaftaran (Admission)</h4>
+                          <p className="text-xs text-gray-500 mt-1">Pasien baru wajib datang ke <span className="font-bold text-amber-700">Loket Pendaftaran / Admission Counter</span> di Lobby Utama terlebih dahulu untuk registrasi data pasien sebelum check-in.</p>
+                        </div>
+                     </div>
+                   )}
+
+                   {/* Check In (Kiosk) - step 1 pasien lama, step 2 pasien baru */}
                    <div className="flex gap-4 mb-6 relative">
                       <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 rounded-full bg-edel-blue text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-blue-50">1</div>
+                        <div className="w-8 h-8 rounded-full bg-edel-blue text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-blue-50">{activeBooking.patientType === 'new' ? '2' : '1'}</div>
                         <div className="w-0.5 flex-1 bg-gray-200 my-1"></div>
                       </div>
                       <div className="flex-1 pb-2">
@@ -1448,10 +1620,10 @@ export default function MediLokaApp() {
                       </div>
                    </div>
 
-                   {/* Step 3: Nurse Station */}
+                   {/* Nurse Station */}
                    <div className="flex gap-4 mb-6 relative">
                       <div className="flex flex-col items-center">
-                         <div className="w-8 h-8 rounded-full bg-edel-pink text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-pink-50">2</div>
+                         <div className="w-8 h-8 rounded-full bg-edel-pink text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-pink-50">{activeBooking.patientType === 'new' ? '3' : '2'}</div>
                          <div className="w-0.5 flex-1 bg-gray-200 my-1"></div>
                       </div>
                       <div className="flex-1 pb-2">
@@ -1460,10 +1632,10 @@ export default function MediLokaApp() {
                       </div>
                    </div>
 
-                    {/* Step 4: Lokasi Poli */}
+                    {/* Ruang Dokter */}
                    <div className="flex gap-4 relative">
                       <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 rounded-full bg-edel-purple text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-purple-50">3</div>
+                        <div className="w-8 h-8 rounded-full bg-edel-purple text-white flex items-center justify-center text-xs font-bold z-10 shadow-md ring-4 ring-purple-50">{activeBooking.patientType === 'new' ? '4' : '3'}</div>
                       </div>
                       <div className="flex-1">
                         <h4 className="text-xs font-bold text-edel-purple">Ruang Dokter</h4>
