@@ -1,0 +1,16 @@
+/**
+ * Contoh entry point untuk Expo.
+ * Copy isi file ini ke App.js di root project Expo.
+ */
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import MediLokaApp from './src/MediLokaApp';
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="auto" />
+      <MediLokaApp />
+    </SafeAreaProvider>
+  );
+}
